@@ -1,3 +1,5 @@
+"use strict";
+
 // HTML in jsx looks like:
 //
 // return <...>
@@ -15,32 +17,36 @@
 // * Recognize import statements and convert .jsx filenames to .js
 // * Emit JS suited to Apostrophe
 
-export default parseFile;
+// export default parseFile;
 
-function parseFile(file) {
-  const it = jsx[Symbol.iterator]();
-  const ti = tokenizer(it);
-  return parseModule(ti);
-}
+// function parseFile(file) {
+//   const it = jsx[Symbol.iterator]();
+//   const ti = tokenizer(it);
+//   return parseModule(ti);
+// }
 
-function parseModule(ti) {
-  let result = '';
-  for (const r of parseJs()) {
-    result += r;
-  }
-  return result;
-}
+// function parseModule(ti) {
+//   let result = '';
+//   for (const r of parseJs()) {
+//     result += r;
+//   }
+//   return result;
+// }
 
-function parseJs(ti) {
+// function parseJs(ti) {
 
-}
+// }
 
-function tokenizer(it) {
+export function tokenizer(it) {
   if (!it.push) {
     it = pushable(it);
   }
-  let state = 'ready';
+  let state = 'init';
   let value = '';
+  let subtokenizer = null;
+  let backtickDepth = null;
+  let jsxDepth = null;
+  let jsxInterpolationDepth = null;
   const interpret = {
     init(ch) {
       if (ch.done) {
@@ -86,6 +92,7 @@ function tokenizer(it) {
       } else {
         it.push(ch);
         state = 'init';
+        value = '';
         return {
           value: '/'
         };
@@ -136,16 +143,14 @@ function tokenizer(it) {
     singleQuoted(ch) {
       if (ch.done) {
         throw error(ch, 'Unexpected end of file inside single-quoted string');
-      } else if (ch === '\'') {
+      } else if (ch.value === '\'') {
         value += ch.value;
         state = 'init';
-        return {
-          value
-        };
-      } else if (ch === '\\') {
+        return returnValue();
+      } else if (ch.value === '\\') {
         value += ch.value;
         state = 'singleQuotedEscape';
-      } else if (ch === '\n') {
+      } else if (ch.value === '\n') {
         throw error(ch, 'Unexpected line break inside single-quoted string');
       } else {
         value += ch.value;
@@ -166,16 +171,16 @@ function tokenizer(it) {
     doubleQuoted(ch) {
       if (ch.done) {
         throw error(ch, 'Unexpected end of file inside double-quoted string');
-      } else if (ch === '"') {
+      } else if (ch.value === '"') {
         value += ch.value;
         state = 'init';
         return {
           value
         };
-      } else if (ch === '\\') {
+      } else if (ch.value === '\\') {
         value += ch.value;
         state = 'doubleQuotedEscape';
-      } else if (ch === '\n') {
+      } else if (ch.value === '\n') {
         throw error(ch, 'Unexpected line break inside double-quoted string');
       } else {
         value += ch.value;
@@ -213,29 +218,30 @@ function tokenizer(it) {
       if (ch.done) {
         throw error(ch, 'Unexpected end of file following `, closing ` expected');
       } else if (ch.value === '{') {
-        let depth = 1;
-        const subtokenizer = tokenizer(it);
-        while (true) {
-          const token = subtokenizer.next();
-          if (token.done) {
-            throw error(ch, 'Unexpected end of file following `...${, closing } expected');
-          }
-          value += token.value;
-          if (token === '{') {
-            depth++;
-          } else if (token === '}') {
-            depth--;
-            if (!depth) {
-              state = 'backticked';
-              break;
-            }
-          }
-        }        
+        backtickDepth = 1;
+        subtokenizer = tokenizer(it);
+        state = 'interpolating';
       }
+    },
+    interpolating(ch) {
+      const token = subtokenizer.next();
+      if (token.done) {
+        throw error(ch, 'Unexpected end of file following `...${, closing } expected');
+      }
+      if (token === '{') {
+        backtickDepth++;
+      } else if (token === '}') {
+        backtickDepth--;
+        if (!backtickDepth) {
+          state = 'backticked';
+        }
+      }
+      return token;
     },
     word(ch) {
       if (ch.done) {
         it.push(ch);
+        state = 'init';
         return {
           value
         };
@@ -243,6 +249,9 @@ function tokenizer(it) {
         if (value === 'return') {
           state = 'jsx?1';
           return pushAndReturnValue(ch);
+        } else {
+          state = 'init';
+          return returnValue();
         }
       } else if ((ch.value === '(') || (ch.value === '=')) {
         state = 'jsx?1';
@@ -266,22 +275,75 @@ function tokenizer(it) {
       }
       // Allow the return statement or (, which was pushed back, to emit normally
       state = 'jsx?2';
-      return returnValue();
+      return {
+        value: ch.value
+      };
     },
     'jsx?2'(ch) {
+      console.log('made it to jsx?2');
       if (isWhitespace(ch.value)) {
+        console.log('still jsx?2');
         return ch;
+      } else if (ch.value === '(') {
+        // still possibly jsx (we will let js worry about mis-nesting)
       } else if (ch.value === '<') {
-        state = 'jsxTag';
+        console.log('really ought to be a tag name about now!');
+        state = 'jsxTagName';
         value = '';
       } else {
         state = 'init';
         return ch;
       }
     },
-    jsxTag(ch) {
+    jsxTagOrText(ch) {
+      if (isWhitespace(ch.value)) {
+        value += ch.value;
+      } else if (ch.value === '{') {
+        jsxInterpolationDepth = 1;
+        subtokenizer = tokenizer(it);
+        state = 'jsxInterpolating';
+      } else if (ch.value === '<') {
+        state = 'jsxTagName';
+        if (value.length) {
+          return returnValue({
+            type: 'tagText',
+            value
+          });
+        }
+      } else if (ch.done) {
+        if (value.length) {
+          it.push(ch);
+          return returnValue({
+            type: 'tagText',
+            value
+          });
+        } else {
+          return ch;
+        }
+      } else {
+        value += ch.value;
+      }
+    },
+    jsxInterpolating(ch) {
+      const token = subtokenizer.next();
+      if (token.done) {
+        throw error(ch, 'Unexpected end of file following `{` in JSX, closing `}` expected');
+      }
+      if (token === '{') {
+        jsxInterpolationDepth++;
+      } else if (token === '}') {
+        jsxInterpolationDepth--;
+        if (!jsxInterpolationDepth) {
+          state = 'jsxTagOrText';
+        }
+      }
+      return token;
+    },
+    jsxTagName(ch) {
       if (isWhitespace(ch.value)) {
         if (value.length > 0) {
+          // We weren't sure until now that this was an opening tag
+          jsxDepth++;
           state = 'jsxAttribute';
           return returnValue({
             type: 'tagName',
@@ -292,14 +354,44 @@ function tokenizer(it) {
         }
       } else if (ch.value === '>') {
         // Special case of <> ... </> with no name
-        state = 'jsxAttributeName';
-        it.push(ch);
+        jsxDepth++;
+        state = 'jsxTagOrText';
         return returnValue({
           type: 'tagName',
           value
         });
+      } else if (ch.value === '/') {
+        if (jsxDepth === 0) {
+          throw error(ch, 'too many closing </...> in JSX expression');
+        }
+        state = 'jsxClosingTagName';
       } else if (isPunctuation(ch.value)) {
         throw error(ch, 'tag name or > expected after < at start of JSX expression');
+      } else {
+        value += ch.value;
+      }
+    },
+    jsxClosingTagName(ch) {
+      if (isWhitespace(ch.value)) {
+        if (value.length > 0) {
+          state = 'jsxClosingTag';
+        } else {
+          throw error(ch, 'closing > expected in </...> in JSX expression');
+        }
+      } else if (ch.value === '>') {
+        jsxDepth--;
+        console.log(`new depth is ${jsxDepth}`);
+        if (!jsxDepth) {
+          state = 'init';
+        } else {
+          state = 'jsxTagOrText';
+        }
+        return returnValue({
+          type: 'closeTag',
+          value
+        });
+      } else if (isPunctuation(ch.value)) {
+        throw error(ch, 'tag name and > expected at end of JSX closing tag');
       } else {
         value += ch.value;
       }
@@ -340,38 +432,99 @@ function tokenizer(it) {
             type: 'startBody'
           });
         }
+      } else if (ch.value === '=') {
+        if (value.length > 0) {
+          it.push(ch);
+          state = 'jsxAttributeValueOrNext';
+          return returnValue({
+            type: 'attributeName',
+            value
+          });
+        }
+      } else if (isPunctuation(ch.value)) {
+        throw error(ch, 'expected whitespace, /, >, or = to end JSX attribute name');
+      } else {
+        value += ch.value;
       }
     },
     jsxAttributeValueOrNext(ch) {
       if (isWhitespace(ch)) {
         return;
-      } else if (ch.value === '"') {
-        state = 'attributeDoubleQuoted';
-        return;
+      } else if (ch.value === '=') {
+        state = 'jsxAttributeValue';
+      } else if (ch.value === '/') {
+        return returnValue({
+          type: 'fastClose'
+        });
+      } else if (ch.value === '>') {
+        state = 'jsxBody';
+        return returnValue({
+          type: 'startBody'
+        });
       } else if (isPunctuation(ch.value)) {
-        throw error(ch, 'quoted attribute value, next attribute or end of tag expected');
+        throw error(ch, 'equal sign, next attribute or end of tag expected');
       } else {
-        // Attribute was boolean, push it back and consider it as next attribute name
+        // Previous attribute was boolean, push it back and consider it as next attribute name
         it.push(ch);
         state = 'jsxAttribute';
       }
     },    
+    jsxAttributeValue(ch) {
+      if (isWhitespace(ch)) {
+        return;
+      } else if (ch.value === '"') {
+        state = 'jsxAttributeDoubleQuoted';
+        return;
+      } else if (ch.value === '\'') {
+        state = 'jsxAttributeSingleQuoted';
+        return;
+      } else {
+        throw error('single or double quote expected after = in JSX attribute');
+      }
+    },
+    jsxAttributeDoubleQuoted(ch) {
+      if (ch === '"') {
+        state = 'jsxAttribute';
+        return returnValue({
+          type: 'attributeValue',
+          value
+        });
+      } else {
+        value += ch;
+      }
+    },
+    jsxAttributeSingleQuoted(ch) {
+      if (ch === '\'') {
+        state = 'jsxAttribute';
+        return returnValue({
+          type: 'attributeValue',
+          value
+        });
+      } else {
+        value += ch;
+      }
+    },
     // TODO:
     // parse quoted values, single and double quoted
     // parse spread attributes
     // parse interpolated attributes
-    // parse body (even more recursive funtimes)
+    // parse interpolation in the text of a component
     // test everything
   };
   return {
     next() {
       let result;
       do {
-        result = interpret[state](it.next());
+        try {
+          let ch = it.next();
+          result = interpret[state](ch);
+        } catch (e) {
+          console.error(`error in state ${state}:`);
+          throw e;
+        }
       } while (result === undefined);
       return result;
-    },
-    done: false
+    }
   };
   function returnValue(v) {
     const result = {
@@ -385,7 +538,17 @@ function tokenizer(it) {
     return returnValue();
   }
   function error(ch, s) {
-    throw new Error(`Row ${ch.row}, column ${ch.col}: ${s}`);
+    let remainder = '';
+    while (true) {
+      const { value, done } = it.next();
+      if (done) {
+        break;
+      }
+      remainder += value;
+    }
+    throw new Error(`Row ${ch.row}, column ${ch.col}: ${s} (saw ${ch.value})\n` +
+      `remainder is: ${remainder}`
+    );
   }
 }
 
@@ -413,7 +576,7 @@ function pushable(it) {
         col++;
       }
       return {
-        ...it.next(),
+        ...next,
         row,
         col
       };
@@ -427,8 +590,8 @@ function pushable(it) {
 }
 
 function isPunctuation(char) {
-  const code = char.charCodeAt(0);
-  return ((code >= 33) && (code <= 64)) || ((code >= 91) && (code <= 127));
+  const code = char?.charCodeAt(0);
+  return ((code >= 33) && (code <= 47)) || ((code >= 58) && (code <= 64)) || ((code >= 91) && (code <= 96)) || ((code >= 123) && (code <= 126));
 }
 
 function isWhitespace(char) {
