@@ -280,14 +280,11 @@ export function tokenizer(it) {
       };
     },
     'jsx?2'(ch) {
-      console.log('made it to jsx?2');
       if (isWhitespace(ch.value)) {
-        console.log('still jsx?2');
         return ch;
       } else if (ch.value === '(') {
         // still possibly jsx (we will let js worry about mis-nesting)
       } else if (ch.value === '<') {
-        console.log('really ought to be a tag name about now!');
         state = 'jsxTagName';
         value = '';
       } else {
@@ -325,13 +322,14 @@ export function tokenizer(it) {
       }
     },
     jsxInterpolating(ch) {
+      it.push(ch);
       const token = subtokenizer.next();
       if (token.done) {
         throw error(ch, 'Unexpected end of file following `{` in JSX, closing `}` expected');
       }
-      if (token === '{') {
+      if (token.value === '{') {
         jsxInterpolationDepth++;
-      } else if (token === '}') {
+      } else if (token.value === '}') {
         jsxInterpolationDepth--;
         if (!jsxInterpolationDepth) {
           state = 'jsxTagOrText';
