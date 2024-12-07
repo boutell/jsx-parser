@@ -1,0 +1,20 @@
+{
+  "name": "jsx-parser",
+  "version": "1.0.0",
+  "description": "Parse JSX without a lot of overhead",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/boutell/jsx-parser.git"
+  },
+  "author": "Thomas Boutell",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/boutell/jsx-parser/issues"
+  },
+  "homepage": "https://github.com/boutell/jsx-parser#readme",
+  "type": "module"
+}
