@@ -69,8 +69,11 @@ export function tokenizer(it) {
         value = ch.value;
         state = 'doubleQuoted';
       } else if (ch.value === '`') {
-        value = ch.value;
+        value = '';
         state = 'backticked';
+        return {
+          type: 'backtickOpen'
+        };
       } else if ((ch.value === '(') || (ch.value === '=')) {
         it.push(ch);
         state = 'jsx?1';
@@ -198,17 +201,19 @@ export function tokenizer(it) {
         state = 'doubleQuoted';
       }
     },
+    // TODO handle escaped $ and ` in backtick strings
     backticked(ch) {
       if (ch.done) {
         throw error(ch, 'Unexpected end of file following `, closing ` expected');
       } else if (ch.value === '`') {
-        value += ch.value;
-        state = 'init';
-        return {
-          value
-        };
+        state = 'backtickClosed';
+        if (value.length) {
+          return returnValue({
+            type: 'backtickString',
+            value
+          });
+        }
       } else if (ch.value === '$') {
-        value += ch.value;
         state = 'interpolated?';
       } else {
         value += ch.value;
@@ -221,9 +226,20 @@ export function tokenizer(it) {
         backtickDepth = 1;
         subtokenizer = tokenizer(it);
         state = 'interpolating';
+        if (value.length) {
+          return returnValue({
+            type: 'backtickString',
+            value
+          });
+        }
+      } else {
+        value += '$' + ch.value;
+        state = 'bacticked';
       }
     },
     interpolating(ch) {
+      // Put ch back so the subtokenizer can read it
+      it.push(ch);
       const token = subtokenizer.next();
       if (token.done) {
         throw error(ch, 'Unexpected end of file following `...${, closing } expected');
@@ -237,6 +253,12 @@ export function tokenizer(it) {
         }
       }
       return token;
+    },
+    backtickClosed(ch) {
+      it.push(ch);
+      return returnValue({
+        type: 'backtickClose'
+      });
     },
     word(ch) {
       if (ch.done) {
@@ -298,7 +320,13 @@ export function tokenizer(it) {
       } else if (ch.value === '{') {
         jsxInterpolationDepth = 1;
         subtokenizer = tokenizer(it);
-        state = 'jsxInterpolating';
+        state = 'jsxInterpolating1';
+        if (value.length) {
+          return returnValue({
+            type: 'tagText',
+            value
+          });
+        }
       } else if (ch.value === '<') {
         state = 'jsxTagName';
         if (value.length) {
@@ -321,7 +349,15 @@ export function tokenizer(it) {
         value += ch.value;
       }
     },
-    jsxInterpolating(ch) {
+    jsxInterpolating1(ch) {
+      it.push(ch);
+      state = 'jsxInterpolating2';
+      return returnValue({
+        type: 'jsxStartJS'
+      });
+    },
+    jsxInterpolating2(ch) {
+      // Put ch back so the subtokenizer can read it
       it.push(ch);
       const token = subtokenizer.next();
       if (token.done) {
@@ -333,9 +369,13 @@ export function tokenizer(it) {
         jsxInterpolationDepth--;
         if (!jsxInterpolationDepth) {
           state = 'jsxTagOrText';
+          return returnValue({
+            type: 'jsxEndJS'
+          })
         }
+      } else {
+        return token;
       }
-      return token;
     },
     jsxTagName(ch) {
       if (isWhitespace(ch.value)) {

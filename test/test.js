@@ -4,11 +4,12 @@ const test = `
 import something from './somewhere.js';
 
 export default function({ name }, { template }) {
+  const fancy = \`Dr. \${name}, Esquire\`;
   return (
     <>
       <h1>Hello</h1>
       <p>
-        Hi there, { name }.
+        Hi there, { fancy }.
       </p>
     </>
   );
