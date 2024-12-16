@@ -4,7 +4,7 @@ const test = `
 import something from './somewhere.js';
 
 export default function({ name }, { template }) {
-  const fancy = \`Dr. \${name}, Esquire\`;
+  const fancy = 'hi there'; // \`Dr. \${name}, Esquire\`;
   return (
     <>
       <h1>Hello</h1>
@@ -22,5 +22,5 @@ while (true) {
   if (token.done) {
     break;
   }
-  console.log(token);
+  console.log(`\nEmitted: ${JSON.stringify(token)}\n`);
 }

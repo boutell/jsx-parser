@@ -311,7 +311,7 @@ export function tokenizer(it) {
         value = '';
       } else {
         state = 'init';
-        return ch;
+        it.push(ch);
       }
     },
     jsxTagOrText(ch) {
@@ -555,6 +555,7 @@ export function tokenizer(it) {
       do {
         try {
           let ch = it.next();
+          console.log(`${state} ${ch.value}`);
           result = interpret[state](ch);
         } catch (e) {
           console.error(`error in state ${state}:`);
